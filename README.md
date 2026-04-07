@@ -69,6 +69,16 @@ Out of scope for v0.1.0:
 - reflection triage helper
 - advanced semantic audit heuristics
 
+## Recommended workspace guidance
+
+To make usage more automatic in practice, add a short rule to your workspace `AGENTS.md` or equivalent guidance file.
+
+Recommended idea:
+- when a task involves durable agent memory, provenance, candidate-note review, head maintenance, or per-agent behavior updates, default to the `agent-heads` workflow
+- when runtime `agent_head_*` tools are available, prefer them over ad-hoc file editing
+
+This does not change the plugin itself, but it significantly improves whether agents reach for the head workflow automatically.
+
 ## Planned next evolution
 
 Potential additions:
