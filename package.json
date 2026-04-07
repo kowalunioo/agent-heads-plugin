@@ -1,6 +1,6 @@
 {
   "name": "agent-heads-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenClaw plugin for per-agent isolated heads, durable memory workflows, and media-to-knowledge ingestion",
   "type": "module",
   "main": "index.ts",

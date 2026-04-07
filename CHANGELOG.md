@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 - 2026-04-07
+
+### Release note
+- Re-cut release after syncing with the published repository history.
+
 ## 0.2.0 - 2026-04-07
 
 ### Added
