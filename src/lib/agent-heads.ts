@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, access, readdir, stat } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 
 export const LOCAL_FILES = [
@@ -51,6 +52,35 @@ export interface SourceRecord {
   status?: string;
   relatedFiles?: string[];
   notes?: string;
+}
+
+export interface MediaIngestDedupeCheck {
+  sourceDuplicate: boolean;
+  sourceDuplicateReasons: string[];
+  knowledgeDuplicate: boolean;
+  knowledgeDuplicateReasons: string[];
+}
+
+export interface MediaKnowledgeCandidate {
+  title: string;
+  content: string;
+  suggestedTarget: EntryTarget;
+  whyDurable: string;
+  confidence: 'low' | 'medium' | 'high';
+}
+
+export type MaterialPreset = 'meeting' | 'podcast' | 'lecture' | 'voice-note' | 'research' | 'pdf' | 'web/article' | 'generic';
+
+interface MaterialPresetProfile {
+  preset: MaterialPreset;
+  summaryLines: number;
+  bulletCap: number;
+  backlogCap: number;
+  preferActionItems: boolean;
+  preferDecisions: boolean;
+  preferQuestions: boolean;
+  preferKeyClaims: boolean;
+  preferOutline: boolean;
 }
 
 export interface PromoteSharedInput {
@@ -414,5 +444,297 @@ export async function auditHead(paths: ResolvedPaths, agentKey: string): Promise
       imports: imports.length,
       sourceRecords: sourceMatches.length,
     },
+  };
+}
+
+export function sanitizeSourceId(value: string): string {
+  return value.trim().replace(/[^A-Za-z0-9._:-]+/g, '-').replace(/^-+|-+$/g, '') || `SRC-${Date.now()}`;
+}
+
+export function buildMediaSourceId(input: { agentKey: string; sourceType: string; origin: string; title?: string; transcriptCacheKey?: string; }): string {
+  const raw = [
+    'MEDIA',
+    input.agentKey,
+    input.sourceType,
+    input.title ?? '',
+    input.transcriptCacheKey ?? '',
+    input.origin,
+  ].filter(Boolean).join('-');
+  return sanitizeSourceId(raw).slice(0, 120);
+}
+
+function normalizeForCompare(value: string): string {
+  return value.replace(/\r/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function fingerprint(value: string): string {
+  return createHash('sha256').update(normalizeForCompare(value)).digest('hex').slice(0, 16);
+}
+
+export async function inspectMediaIngestDedupe(paths: ResolvedPaths, agentKey: string, input: {
+  sourceId: string;
+  origin: string;
+  title: string;
+  sourceType: string;
+  transcriptCacheKey?: string;
+  summary?: string;
+  bullets?: string[];
+  backlogItems?: string[];
+}): Promise<MediaIngestDedupeCheck> {
+  await initializeHead(paths, agentKey);
+  const snapshot = await readHeadSnapshot(paths, agentKey);
+  const sources = snapshot['SOURCES.md'];
+  const knowledge = snapshot['KNOWLEDGE.md'];
+  const backlog = snapshot['BACKLOG.md'];
+  const corpus = [sources, knowledge, memory, backlog].filter(Boolean).join('\n\n');
+  const sourceDuplicateReasons: string[] = [];
+  const knowledgeDuplicateReasons: string[] = [];
+
+  const sourceChecks = [input.sourceId, input.origin, input.title, input.transcriptCacheKey].filter(Boolean).map(String);
+  for (const token of sourceChecks) {
+    if (corpus.includes(token)) sourceDuplicateReasons.push(`matched existing durable text: ${token}`);
+  }
+
+  const summary = input.summary?.trim();
+  if (summary) {
+    const sumFp = fingerprint(summary);
+    if (corpus.includes(sumFp) || corpus.includes(normalizeForCompare(summary).slice(0, 80))) {
+      knowledgeDuplicateReasons.push('summary already appears in durable files');
+    }
+  }
+  for (const bullet of input.bullets ?? []) {
+    const fp = fingerprint(bullet);
+    if (corpus.includes(fp)) knowledgeDuplicateReasons.push(`bullet already appears in durable files: ${bullet}`);
+  }
+  for (const item of input.backlogItems ?? []) {
+    const fp = fingerprint(item);
+    if (corpus.includes(fp)) knowledgeDuplicateReasons.push(`backlog item already appears in durable files: ${item}`);
+  }
+
+  return {
+    sourceDuplicate: sourceDuplicateReasons.length > 0,
+    sourceDuplicateReasons,
+    knowledgeDuplicate: knowledgeDuplicateReasons.length > 0,
+    knowledgeDuplicateReasons,
+  };
+}
+
+function deriveTitleFromOrigin(origin: string): string {
+  const trimmed = origin.trim();
+  if (!trimmed) return 'Untitled media source';
+  try {
+    const url = new URL(trimmed);
+    const seg = url.pathname.split('/').filter(Boolean).at(-1);
+    return decodeURIComponent(seg || url.hostname || trimmed);
+  } catch {
+    return basename(trimmed);
+  }
+}
+
+function splitSentences(text: string): string[] {
+  return text
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function countMatches(text: string, patterns: RegExp[]): number {
+  return patterns.reduce((total, pattern) => total + (text.match(pattern)?.length ?? 0), 0);
+}
+
+function detectMaterialPreset(input: {
+  sourceType: string;
+  origin: string;
+  title?: string;
+  transcriptText: string;
+  artifacts?: Record<string, unknown>;
+}): MaterialPreset {
+  const text = `${input.title ?? ''}\n${input.origin}\n${input.transcriptText}`.toLowerCase();
+  const artifactText = JSON.stringify(input.artifacts ?? {}).toLowerCase();
+  const haystack = `${text}\n${artifactText}`;
+
+  const score = {
+    meeting: countMatches(haystack, [/\bminutes\b/g, /\bagenda\b/g, /\baction item/g, /\bdecided\b/g, /\bnext steps?\b/g, /\battendees?\b/g, /^\s*[-*] /gm]) + (/(?:\bwe\b.*\bdecided\b|\bcan you\b|\blet's\b)/g.test(haystack) ? 2 : 0),
+    podcast: countMatches(haystack, [/\bepisode\b/g, /\bhost\b/g, /\bguest\b/g, /\bsponsor\b/g, /\bshow notes?\b/g, /\bsubscribe\b/g, /\brating\b/g]),
+    lecture: countMatches(haystack, [/\blecture\b/g, /\bstudent\b/g, /\bprofessor\b/g, /\bslides?\b/g, /\bchapter\b/g, /\bexam\b/g, /\blesson\b/g, /\bcourse\b/g]),
+    'voice-note': countMatches(haystack, [/\bquick note\b/g, /\bremind me\b/g, /\bmental note\b/g, /\bjust saying\b/g, /\bi need to\b/g, /\btodo\b/g, /\bcall me\b/g, /\btext me\b/g]),
+    research: countMatches(haystack, [/\bhypothesis\b/g, /\bmethod(?:ology)?\b/g, /\bresult(?:s)?\b/g, /\bconclusion(?:s)?\b/g, /\bexperiment\b/g, /\bevidence\b/g, /\bcitation\b/g, /\breferences?\b/g, /\bpaper\b/g]),
+    pdf: countMatches(haystack, [/\.pdf\b/g, /\bocr\b/g, /\bpage \d+\b/g, /\bfigure\b/g, /\btable\b/g, /\bappendix\b/g]),
+    'web/article': countMatches(haystack, [/\barticle\b/g, /\bblog\b/g, /\bnewsletter\b/g, /\bpublication\b/g, /\blink\b/g, /\bweb\b/g, /\bhtml\b/g]),
+  } as Record<MaterialPreset, number>;
+
+  if (input.sourceType === 'youtube' && score.podcast >= score.meeting) return 'podcast';
+  if (/\.pdf($|\?)/i.test(input.origin) || score.pdf >= 2) return 'pdf';
+  if (score.research >= 3) return 'research';
+  if (score.lecture >= 3) return 'lecture';
+  if (score['voice-note'] >= 3 || normalizedShortText(input.transcriptText)) return 'voice-note';
+  if (score.meeting >= 4) return 'meeting';
+  if (score.podcast >= 3) return 'podcast';
+  if (score['web/article'] >= 3) return 'web/article';
+  return 'generic';
+}
+
+function normalizedShortText(text: string): boolean {
+  const t = text.trim();
+  return t.length > 0 && t.length < 220;
+}
+
+function getPresetProfile(preset: MaterialPreset): MaterialPresetProfile {
+  switch (preset) {
+    case 'meeting': return { preset, summaryLines: 2, bulletCap: 10, backlogCap: 10, preferActionItems: true, preferDecisions: true, preferQuestions: true, preferKeyClaims: false, preferOutline: false };
+    case 'podcast': return { preset, summaryLines: 3, bulletCap: 8, backlogCap: 4, preferActionItems: false, preferDecisions: false, preferQuestions: false, preferKeyClaims: true, preferOutline: false };
+    case 'lecture': return { preset, summaryLines: 3, bulletCap: 10, backlogCap: 5, preferActionItems: false, preferDecisions: false, preferQuestions: true, preferKeyClaims: true, preferOutline: true };
+    case 'voice-note': return { preset, summaryLines: 1, bulletCap: 6, backlogCap: 8, preferActionItems: true, preferDecisions: true, preferQuestions: true, preferKeyClaims: false, preferOutline: false };
+    case 'research': return { preset, summaryLines: 3, bulletCap: 12, backlogCap: 8, preferActionItems: false, preferDecisions: false, preferQuestions: true, preferKeyClaims: true, preferOutline: true };
+    case 'pdf': return { preset, summaryLines: 3, bulletCap: 10, backlogCap: 6, preferActionItems: false, preferDecisions: false, preferQuestions: true, preferKeyClaims: true, preferOutline: true };
+    case 'web/article': return { preset, summaryLines: 3, bulletCap: 10, backlogCap: 6, preferActionItems: false, preferDecisions: false, preferQuestions: true, preferKeyClaims: true, preferOutline: false };
+    default: return { preset: 'generic', summaryLines: 2, bulletCap: 8, backlogCap: 6, preferActionItems: true, preferDecisions: true, preferQuestions: true, preferKeyClaims: true, preferOutline: false };
+  }
+}
+
+function limitByLength(items: string[], maxItems: number, maxLen = 240): string[] {
+  const out: string[] = [];
+  for (const item of items) {
+    const clean = item.replace(/\s+/g, ' ').trim();
+    if (!clean) continue;
+    out.push(clean.length > maxLen ? `${clean.slice(0, maxLen - 1)}…` : clean);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+export function extractMediaKnowledge(input: {
+  transcriptText: string;
+  sourceType: string;
+  origin: string;
+  title?: string;
+  materialPreset?: MaterialPreset;
+  maxItems?: number;
+  chunked?: boolean;
+  transcriptCacheKey?: string;
+  artifacts?: Record<string, unknown>;
+}): {
+  summary: string;
+  bullets: string[];
+  backlogItems: string[];
+  candidates: MediaKnowledgeCandidate[];
+  confidence: 'low' | 'medium' | 'high';
+  materialPreset: MaterialPreset;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const maxItems = Math.min(50, Math.max(1, Math.floor(input.maxItems ?? 8)));
+  const normalizedText = input.transcriptText.replace(/\r/g, '').trim();
+  const materialPreset = input.materialPreset ?? detectMaterialPreset(input);
+  const profile = getPresetProfile(materialPreset);
+  const lines = normalizedText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const sentences = splitSentences(normalizedText);
+  const summarySource = lines.slice(0, profile.summaryLines).join(' ')
+    || lines.find((line) => line.length >= 40)
+    || sentences.slice(0, profile.summaryLines).join(' ')
+    || normalizedText;
+  const summary = summarySource
+    ? (summarySource.length > 700 ? `${summarySource.slice(0, 699)}…` : summarySource)
+    : 'Transcript imported, but no durable textual content was extracted.';
+
+  const bulletSeed = [
+    ...lines.filter((line) => /^[-*•]/.test(line)).map((line) => line.replace(/^[-*•]\s*/, '')),
+    ...(profile.preferOutline ? lines.filter((line) => /^\d+[.)]\s+/.test(line)).map((line) => line.replace(/^\d+[.)]\s+/, '')) : []),
+    ...sentences.filter((s) => s.length >= 40 || (profile.preferKeyClaims && /\b(?:because|therefore|means|suggests|indicates|shows)\b/i.test(s))),
+  ];
+  const bullets = limitByLength(Array.from(new Set(bulletSeed)), Math.min(maxItems, profile.bulletCap));
+
+  const backlogSeed = [
+    ...(profile.preferActionItems ? lines.filter((line) => /\b(todo|follow up|follow-up|next step|action item|action items|owner|due|deadline|assign)\b/i.test(line)) : []),
+    ...(profile.preferQuestions ? lines.filter((line) => /\b(open question|question|clarify|check|verify|investigate|review)\b/i.test(line)) : []),
+    ...sentences.filter((s) => /\b(todo|follow up|follow-up|next step|action item|open question|question|investigate|verify|review|decide|confirm)\b/i.test(s)),
+  ];
+  const backlogItems = limitByLength(Array.from(new Set(backlogSeed)), Math.max(3, Math.min(profile.backlogCap, maxItems)));
+
+  if (!normalizedText) warnings.push('Transcript text was empty after normalization.');
+  if (normalizedText.length < 120) warnings.push('Transcript is very short; durable extraction confidence is limited.');
+  if (bullets.length === 0 && normalizedText) warnings.push('No strong bullet-like claims detected; candidate summary may need manual review.');
+
+  const sourceTitle = input.title?.trim() || deriveTitleFromOrigin(input.origin);
+  const provenanceBlock = [
+    '',
+    '### Provenance',
+    '',
+    `- Source type: ${input.sourceType}`,
+    `- Origin: ${input.origin}`,
+    `- Title: ${sourceTitle}`,
+    `- Transcript cache key: ${input.transcriptCacheKey ?? '-'}`,
+    `- Chunked: ${input.chunked ? 'yes' : 'no'}`,
+    `- Artifacts: ${input.artifacts ? JSON.stringify(input.artifacts) : '-'}`,
+  ].join('\n');
+
+  const candidates: MediaKnowledgeCandidate[] = [];
+  if (summary) {
+    candidates.push({
+      title: `${sourceTitle} — ${materialPreset} distilled knowledge`,
+      suggestedTarget: 'knowledge',
+      whyDurable: `Transcript-derived summary using the ${materialPreset} preset for future reuse.`,
+      confidence: normalizedText.length > 500 ? 'medium' : 'low',
+      content: [
+        `## Summary`,
+        '',
+        summary,
+        '',
+        `- Material preset: ${materialPreset}`,
+        '',
+        ...(bullets.length ? ['## Key points', '', ...bullets.map((b) => `- ${b}`), ''] : []),
+        provenanceBlock,
+      ].join('\n').trim(),
+    });
+  }
+  if (profile.preferDecisions) {
+    const decisionLines = lines.filter((line) => /\b(decided|decision|agree|agreed|approved|rejected|blocked|won't|will|should|must)\b/i.test(line));
+    if (decisionLines.length) {
+      candidates.push({
+        title: `${sourceTitle} — decisions`,
+        suggestedTarget: 'decisions',
+        whyDurable: `Preset ${materialPreset} surfaced explicit decisions worth keeping.`,
+        confidence: 'medium',
+        content: [
+          '## Decisions',
+          '',
+          ...limitByLength(Array.from(new Set(decisionLines)), Math.min(6, maxItems)).map((line) => `- ${line}`),
+          '',
+          provenanceBlock,
+        ].join('\n').trim(),
+      });
+    }
+  }
+  if (backlogItems.length) {
+    candidates.push({
+      title: `${sourceTitle} — follow-ups`,
+      suggestedTarget: 'backlog',
+      whyDurable: `Preset ${materialPreset} found unresolved items or next steps worth tracking.`,
+      confidence: 'medium',
+      content: [
+        `## Follow-ups`,
+        '',
+        ...backlogItems.map((item) => `- ${item}`),
+        '',
+        provenanceBlock,
+      ].join('\n').trim(),
+    });
+  }
+
+  const confidence: 'low' | 'medium' | 'high' = normalizedText.length > 1800 && bullets.length >= 3
+    ? 'high'
+    : normalizedText.length > 400
+      ? 'medium'
+      : 'low';
+
+  return {
+    summary,
+    bullets,
+    backlogItems,
+    candidates,
+    confidence,
+    materialPreset,
+    warnings,
   };
 }
