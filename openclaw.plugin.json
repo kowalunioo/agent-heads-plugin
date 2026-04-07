@@ -1,0 +1,13 @@
+{
+  "id": "agent-heads",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "rootDir": { "type": "string" },
+      "sharedDir": { "type": "string" },
+      "defaultAgentKey": { "type": "string" },
+      "currentAgentKey": { "type": "string" }
+    }
+  }
+}
