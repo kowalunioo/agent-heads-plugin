@@ -17,16 +17,19 @@ OpenClaw plugin implementing small, composable tools for per-agent isolated head
 
 ## Current tool set
 
-- `agent_head_init`
-- `agent_head_status`
-- `agent_head_write_entry`
-- `agent_head_register_source`
-- `agent_head_read`
-- `agent_head_read_file`
-- `agent_head_promote_shared`
-- `agent_head_create_conversation_candidate`
-- `agent_head_promote_conversation_candidate`
-- `agent_head_curate_file`
+- `agent_head_init` — create the canonical directory structure and starter files for a per-agent head
+- `agent_head_status` — inspect one head and return audit-style status, issues, warnings, suggestions, and counts
+- `agent_head_write_entry` — append a curated entry into one durable local file
+- `agent_head_register_source` — register a generic provenance/source record in `SOURCES.md`
+- `agent_head_read` — read the durable snapshot of the whole local head
+- `agent_head_read_file` — read one selected durable file from a local head
+- `agent_head_promote_shared` — promote reviewed local material into the shared layer explicitly
+- `agent_head_create_conversation_candidate` — create a reviewed-later candidate note from conversation under `notes/conversation/`
+- `agent_head_promote_conversation_candidate` — promote a reviewed conversation candidate into one durable local file
+- `agent_head_curate_file` — append a curation note or rewrite a durable local file during maintenance
+- `agent_head_log_learning` — quickly append a durable learning to `LEARNINGS.md`
+- `agent_head_log_error` — quickly append an error pattern or failure mode to `ERRORS.md`
+- `agent_head_log_backlog_item` — quickly append a backlog item or open question to `BACKLOG.md`
 
 ## Config
 

@@ -160,6 +160,17 @@ const promoteConversationCandidateSchema = {
   },
 };
 
+const quickLogSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['content'],
+  properties: {
+    agentKey: { type: 'string' },
+    content: { type: 'string' },
+    heading: { type: 'string' },
+  },
+};
+
 function toolResult(payload: Record<string, unknown>) {
   return {
     content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
@@ -348,6 +359,45 @@ export default {
           markStatus: (typeof p.markStatus === 'string' ? p.markStatus : undefined) as 'reviewed' | 'promoted' | undefined,
         });
         return toolResult({ ok: true, agentKey, ...result });
+      },
+    }));
+
+    api.registerTool(() => ({
+      name: 'agent_head_log_learning',
+      label: 'Log Agent Learning',
+      description: 'Quickly append a durable learning to LEARNINGS.md.',
+      parameters: quickLogSchema,
+      async execute(_toolCallId, params) {
+        const p = params as Record<string, unknown>;
+        const agentKey = resolveAgentKey({ agentKey: typeof p.agentKey === 'string' ? p.agentKey : undefined, config: pluginConfig, runtimeHint });
+        const result = await appendEntry(paths, agentKey, 'learnings', String(p.content ?? ''), typeof p.heading === 'string' ? p.heading : 'Learning');
+        return toolResult({ ok: true, agentKey, target: 'LEARNINGS.md', ...result });
+      },
+    }));
+
+    api.registerTool(() => ({
+      name: 'agent_head_log_error',
+      label: 'Log Agent Error Pattern',
+      description: 'Quickly append an error pattern or failure mode to ERRORS.md.',
+      parameters: quickLogSchema,
+      async execute(_toolCallId, params) {
+        const p = params as Record<string, unknown>;
+        const agentKey = resolveAgentKey({ agentKey: typeof p.agentKey === 'string' ? p.agentKey : undefined, config: pluginConfig, runtimeHint });
+        const result = await appendEntry(paths, agentKey, 'errors', String(p.content ?? ''), typeof p.heading === 'string' ? p.heading : 'Error');
+        return toolResult({ ok: true, agentKey, target: 'ERRORS.md', ...result });
+      },
+    }));
+
+    api.registerTool(() => ({
+      name: 'agent_head_log_backlog_item',
+      label: 'Log Agent Backlog Item',
+      description: 'Quickly append a backlog item or open question to BACKLOG.md.',
+      parameters: quickLogSchema,
+      async execute(_toolCallId, params) {
+        const p = params as Record<string, unknown>;
+        const agentKey = resolveAgentKey({ agentKey: typeof p.agentKey === 'string' ? p.agentKey : undefined, config: pluginConfig, runtimeHint });
+        const result = await appendEntry(paths, agentKey, 'backlog', String(p.content ?? ''), typeof p.heading === 'string' ? p.heading : 'Backlog');
+        return toolResult({ ok: true, agentKey, target: 'BACKLOG.md', ...result });
       },
     }));
 
