@@ -139,6 +139,7 @@ The ingestion layer now also accepts `materialType` and falls back to determinis
 The practical bridge is metadata-first, not raw-text-first.
 
 Use these conventions when feeding media into agent heads:
+- install/download the transcription-system first for audio, video, podcasts, lectures, and YouTube sources
 - keep transcript artifacts in the transcription system
 - register a `transcript` source in `SOURCES.md`
 - preserve `sourceId`, `cache_key`, `selected_input_path`, and artifact paths
