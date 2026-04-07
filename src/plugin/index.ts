@@ -8,6 +8,7 @@ import {
   registerSource,
   promoteToShared,
   createConversationCandidate,
+  promoteConversationCandidate,
   curateHeadFile,
   resolveAgentKey,
   resolvePaths,
@@ -140,6 +141,22 @@ const curateFileSchema = {
     },
     instruction: { type: 'string' },
     mode: { type: 'string', enum: ['append-note', 'rewrite'] },
+  },
+};
+
+const promoteConversationCandidateSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['candidatePath', 'target'],
+  properties: {
+    agentKey: { type: 'string' },
+    candidatePath: { type: 'string' },
+    target: {
+      type: 'string',
+      enum: ['identity', 'learnings', 'errors', 'decisions', 'playbooks', 'memory', 'knowledge', 'sources', 'backlog'],
+    },
+    heading: { type: 'string' },
+    markStatus: { type: 'string', enum: ['reviewed', 'promoted'] },
   },
 };
 
@@ -316,18 +333,19 @@ export default {
     }));
 
     api.registerTool(() => ({
-      name: 'agent_head_curate_file',
-      label: 'Curate Agent Head File',
-      description: 'Append a curation note or rewrite one durable local head file during cleanup/maintenance.',
-      parameters: curateFileSchema,
+      name: 'agent_head_promote_conversation_candidate',
+      label: 'Promote Conversation Candidate',
+      description: 'Promote a reviewed conversation candidate note into one durable local head file.',
+      parameters: promoteConversationCandidateSchema,
       async execute(_toolCallId, params) {
         const p = params as Record<string, unknown>;
         const agentKey = resolveAgentKey({ agentKey: typeof p.agentKey === 'string' ? p.agentKey : undefined, config: pluginConfig, runtimeHint });
-        const result = await curateHeadFile(paths, {
+        const result = await promoteConversationCandidate(paths, {
           agentKey,
-          file: p.file as LocalFile,
-          instruction: String(p.instruction ?? ''),
-          mode: (p.mode === 'rewrite' ? 'rewrite' : 'append-note'),
+          candidatePath: String(p.candidatePath ?? ''),
+          target: p.target as EntryTarget,
+          heading: typeof p.heading === 'string' ? p.heading : undefined,
+          markStatus: (typeof p.markStatus === 'string' ? p.markStatus : undefined) as 'reviewed' | 'promoted' | undefined,
         });
         return toolResult({ ok: true, agentKey, ...result });
       },

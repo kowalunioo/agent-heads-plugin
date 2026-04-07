@@ -82,6 +82,14 @@ export interface CurateFileInput {
   mode?: 'append-note' | 'rewrite';
 }
 
+export interface PromoteConversationCandidateInput {
+  agentKey: string;
+  candidatePath: string;
+  target: EntryTarget;
+  heading?: string;
+  markStatus?: 'reviewed' | 'promoted';
+}
+
 const LOCAL_FILE_MAP: Record<EntryTarget, LocalFile> = {
   identity: 'IDENTITY.md',
   learnings: 'LEARNINGS.md',
@@ -281,6 +289,26 @@ export async function createConversationCandidate(paths: ResolvedPaths, input: C
   ].join('\n');
   await writeFile(filePath, body, 'utf8');
   return { path: filePath, fileName };
+}
+
+export async function promoteConversationCandidate(paths: ResolvedPaths, input: PromoteConversationCandidateInput): Promise<{ candidatePath: string; targetFile: LocalFile; targetPath: string }> {
+  await initializeHead(paths, input.agentKey);
+  const candidatePath = input.candidatePath;
+  const raw = await readFile(candidatePath, 'utf8');
+  const match = raw.match(/## Candidate content\n\n([\s\S]*?)\n?$/);
+  const candidateContent = (match?.[1] ?? raw).trim();
+  const targetPath = getLocalFilePath(paths, input.agentKey, input.target);
+  const heading = input.heading?.trim() || `Promoted conversation candidate: ${basename(candidatePath)}`;
+  const current = await readFile(targetPath, 'utf8');
+  const block = `\n## ${heading}\n\n${candidateContent}\n`;
+  await writeFile(targetPath, `${current.trimEnd()}\n${block}`, 'utf8');
+
+  const nextStatus = input.markStatus ?? 'promoted';
+  const updated = raw.replace(/- Review status: .*/,
+    `- Review status: ${nextStatus}`);
+  await writeFile(candidatePath, updated, 'utf8');
+
+  return { candidatePath, targetFile: LOCAL_FILE_MAP[input.target], targetPath };
 }
 
 export async function promoteToShared(paths: ResolvedPaths, input: PromoteSharedInput): Promise<{ sharedPath: string; localPath: string; targetFile: SharedFile; sourceFile: LocalFile }> {
