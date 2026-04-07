@@ -18,7 +18,7 @@ agent-heads/
 │   ├── KNOWLEDGE.md
 │   ├── SOURCES.md
 │   └── POLICIES.md
-└── bankrut-jezyslaw/
+└── your-agent/
     ├── IDENTITY.md
     ├── LEARNINGS.md
     ├── ERRORS.md

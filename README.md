@@ -41,7 +41,7 @@ Recommended runtime config uses absolute workspace paths:
   "config": {
     "rootDir": "/home/user/.openclaw/workspace/agent-heads",
     "sharedDir": "/home/user/.openclaw/workspace/agent-heads/shared",
-    "defaultAgentKey": "bankrut-jezyslaw"
+    "defaultAgentKey": "your-agent"
   }
 }
 ```

@@ -251,13 +251,13 @@ Each agent gets its own directory.
 Example:
 
 ```text
-/home/user/.openclaw/workspace/agent-heads/bankrut-jezyslaw/
+/home/user/.openclaw/workspace/agent-heads/your-agent/
 ```
 
 Suggested layout:
 
 ```text
-agent-heads/bankrut-jezyslaw/
+agent-heads/your-agent/
 ├── IDENTITY.md
 ├── LEARNINGS.md
 ├── ERRORS.md
@@ -477,7 +477,7 @@ Each source record should include at least:
 - Type: web
 - Origin: https://example.com/article
 - Added At: 2026-04-06T18:00:00Z
-- Added For: bankrut-jezyslaw
+- Added For: your-agent
 - Trust: medium
 - Status: reviewed
 - Related Files: notes/example-source.md
@@ -577,7 +577,7 @@ Example:
 - Type: user-feedback
 - Origin: discord conversation
 - Added At: 2026-04-06T18:15:00Z
-- Added For: bankrut-jezyslaw
+- Added For: your-agent
 - Trust: high
 - Status: reviewed
 - Related Files: notes/2026-04-06__tone-feedback.md
@@ -880,7 +880,7 @@ The MVP should focus only on the core system.
 - one generic source registration script
 - one generic append-entry helper
 - one audit helper
-- one pilot head, e.g. `bankrut-jezyslaw`
+- one pilot head, e.g. `your-agent`
 
 ### MVP is done when
 
@@ -903,7 +903,7 @@ Create canonical `agent-heads/` structure.
 Create `shared/` starter files.
 
 ### Step 3
-Create one example local head: `bankrut-jezyslaw`.
+Create one example local head: `your-agent`.
 
 ### Step 4
 Scaffold `skills/agent-head-memory/`.
@@ -942,7 +942,7 @@ Only then decide whether to add or revive plugin tooling.
 When resuming this work in a new session:
 
 1. create `agent-heads/shared/`
-2. create `agent-heads/bankrut-jezyslaw/`
+2. create `agent-heads/your-agent/`
 3. create starter files for shared and local head
 4. scaffold `skills/agent-head-memory/`
 5. write `SKILL.md`
